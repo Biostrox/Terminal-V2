@@ -5978,6 +5978,7 @@ function optPlan(spot, s, grp, cur, exp) {
 
 /* ---------- chargement unique et partagé (évite que la carte de liquidité et le panneau options demandent deux fois la même chose) ---------- */
 const OPT_CACHE = {};
+const OPT_HZ = [["1m", "1 min", 1 / 60, 0], ["5m", "5 min", 5 / 60, 0], ["15m", "15 min", 0.25, 0], ["1h", "1 h", 1, 0], ["4h", "4 h", 4, 0], ["1D", "Journée", 24, 0.5], ["sw", "Swing (1-2 sem.)", 24 * 8, 6]];
 async function optLoadFull(cur) {
   const res = { cur, chain: {}, spot: null, src: [], inst: [], dvol: null };
   let under = null;
@@ -6030,7 +6031,7 @@ const OPT_STRATS = [
 PANELS.options = {
   title: "Options · aimant", desc: "Options BTC / ETH (Deribit + OKX) : plan de trade, murs et aimant, volatilité implicite, mouvement attendu, gamma, et simulateur de stratégie", w: 6, h: 14,
   init(body, ctx) {
-    const st = ctx.inst.state; st.cur ||= "BTC"; st.exp ??= ""; st.tab ||= "plan"; st.sg ||= { t: "call", q: 0.1 }; st.mode ||= "intra";
+    const st = ctx.inst.state; st.cur ||= "BTC"; st.exp ??= ""; st.tab ||= "plan"; st.sg ||= { t: "call", q: 0.1 }; st.mode ||= "intra"; st.hz ||= "1h";
     body.style.display = "flex"; body.style.flexDirection = "column";
     const tb = h("div", { class: "toolbar" }), out = h("div", { style: "flex:1;overflow:auto" });
     body.append(tb, out);
@@ -6042,7 +6043,7 @@ PANELS.options = {
     function drawTb() {
       tb.innerHTML = `<span class="seg">${["BTC", "ETH"].map(c => `<button data-c="${c}" class="${c === st.cur ? "on" : ""}">${c}</button>`).join("")}</span>
         <span class="seg">${[["plan", "Plan"], ["oi", "Carte OI"], ["vol", "Volatilité"], ["strat", "Stratégie"]].map(([k, l]) => `<button data-t="${k}" class="${k === st.tab ? "on" : ""}">${l}</button>`).join("")}</span>
-        <span class="seg"><button data-m="intra" class="${st.mode === "intra" ? "on" : ""}" title="Échéance du jour : niveaux pour des trades de quelques minutes à 1 heure">Intraday ≤ 1 h</button><button data-m="fond" class="${st.mode !== "intra" ? "on" : ""}" title="Toutes les échéances : niveaux de fond (jours, semaines)">Fond</button></span>
+        <select class="inp hz" title="Durée de ton trade : les niveaux, la zone attendue et les stops s'adaptent">${OPT_HZ.map(([k, l]) => `<option value="${k}" ${st.mode === "intra" && st.hz === k ? "selected" : ""}>Trade ${l}</option>`).join("")}<option value="fond" ${st.mode !== "intra" ? "selected" : ""}>Fond (toutes échéances)</option></select>
         <select class="inp exp" style="${st.mode === "intra" && st.tab !== "vol" && st.tab !== "strat" ? "display:none" : ""}"><option value="">Toutes les échéances</option>${exps().map(e => `<option value="${e}" ${e === st.exp ? "selected" : ""}>${fmtDay(e)} (${Math.max(0, Math.round(optT(e) * 365))} j)</option>`).join("")}</select>
         <span style="flex:1"></span><button class="btn rf" title="Rafraîchir">↻</button>`;
     }
@@ -6052,11 +6053,11 @@ PANELS.options = {
       const t = e.target.closest("[data-t]"); if (t) { st.tab = t.dataset.t; ctx.save(); drawTb(); draw(); return; }
       if (e.target.closest(".rf")) { delete OPT_CACHE[st.cur]; load(); }
     };
-    tb.onchange = e => { if (e.target.classList.contains("exp")) { st.exp = e.target.value; ctx.save(); draw(); } };
+    tb.onchange = e => { if (e.target.classList.contains("exp")) { st.exp = e.target.value; ctx.save(); draw(); } if (e.target.classList.contains("hz")) { if (e.target.value === "fond") st.mode = "fond"; else { st.mode = "intra"; st.hz = e.target.value; } ctx.save(); drawTb(); draw(); } };
     /* chiffres communs aux onglets, calculés une seule fois */
     function core() {
       const list = exps(); if (st.exp && !list.includes(st.exp)) st.exp = "";
-      const intra = st.mode === "intra" && (st.tab === "plan" || st.tab === "oi"), E = intra ? (list.find(e => optT(e) * 365 >= 0.02) || list[0]) : st.exp;
+      const intra = st.mode === "intra" && (st.tab === "plan" || st.tab === "oi"), HZ = OPT_HZ.find(x => x[0] === st.hz) || OPT_HZ[3], E = intra ? (list.find(e => optT(e) * 365 >= Math.max(0.02, HZ[3])) || list.at(-1)) : st.exp;
       const merged = {};
       for (const e of E ? [E] : list) for (const [k, r] of Object.entries(data.chain[e] || {})) { const m = merged[k] ||= { c: 0, p: 0, cD: 0, pD: 0, cO: 0, pO: 0 }; for (const f of ["c", "p", "cD", "pD", "cO", "pO"]) m[f] += r[f] || 0; }
       const spot = data.spot, rows = Object.entries(merged).map(([k, r]) => [+k, r]).sort((a, b) => a[0] - b[0]);
@@ -6068,7 +6069,7 @@ PANELS.options = {
       const skP = optIvAt(live, m30, spot * 0.9, "P"), skC = optIvAt(live, m30, spot * 1.1, "C");
       const vC = live.filter(x => x.cp === "C").reduce((a, x) => a + x.vol, 0), vP = live.filter(x => x.cp === "P").reduce((a, x) => a + x.vol, 0);
       const gex = optGex(E ? live.filter(x => x.exp === E) : live, spot);
-      return { list, rows, spot, s, live, near, focus, atm, atmF, m30, skew: skP && skC ? skP - skC : null, vC, vP, gex, intra, E };
+      return { list, rows, spot, s, live, near, focus, atm, atmF, m30, skew: skP && skC ? skP - skC : null, vC, vP, gex, intra, E, HZ };
     }
     function draw() {
       if (!data) return;
@@ -6077,7 +6078,7 @@ PANELS.options = {
       const { s, spot } = C, dist = (s.mp - spot) / spot * 100;
       LAST.opt = { cur: st.cur, spot, mp: s.mp, dist, callWall: s.callWall, putWall: s.putWall, pcr: s.pcr, iv: C.atm, flip: C.gex.flip };
       ctx.setBadge(data.src.length ? "delay" : "");
-      out.innerHTML = st.tab === "oi" ? (C.intra ? `<div class="hint" style="padding:6px 10px 0">Échéance du jour seulement (${fmtDay(C.E, { day: "numeric", month: "short" })}, 9 h heure belge). Passe en « Fond » pour toutes les échéances.</div>` : "") + tabOI(C) : st.tab === "vol" ? tabVol(C) : st.tab === "strat" ? tabStrat(C) : C.intra ? tabIntra(C) : tabPlan(C);
+      out.innerHTML = st.tab === "oi" ? (C.intra ? `<div class="hint" style="padding:6px 10px 0">Échéance utilisée pour un trade ${esc(C.HZ[1])} : ${fmtDay(C.E, { day: "numeric", month: "short" })} (9 h, heure belge). Choisis « Fond » pour toutes les échéances.</div>` : "") + tabOI(C) : st.tab === "vol" ? tabVol(C) : st.tab === "strat" ? tabStrat(C) : C.intra ? tabIntra(C) : tabPlan(C);
       if (st.tab === "strat") bindStrat(C);
     }
     const kpi = (l, v, d, c) => `<div class="stat"><div class="l">${l}</div><div class="v ${c || ""}">${v}</div>${d ? `<div class="d">${d}</div>` : ""}</div>`;
@@ -6098,18 +6099,18 @@ PANELS.options = {
         <p class="hint" style="padding:0 10px 10px">Mouvement attendu = ce que la volatilité implicite prévoit dans 68 % des cas. Sources : ${data.src.join(" + ") || "aucune"}. Pas un conseil.</p>`;
     }
     function tabIntra(C) {
-      const { spot, live, E } = C, iv = C.atm, T = optT(E), P = P0;
+      const { spot, live, E, HZ } = C, iv = C.atm, T = optT(E), P = P0, H = HZ[2], HL = HZ[1];
       if (!iv) return `<div class="empty">Pas de volatilité disponible pour l'échéance du jour.</div>`;
-      const s1 = spot * iv / 100 * Math.sqrt(1 / 8760), s2 = s1 * 2, sD = spot * iv / 100 * Math.sqrt(T);
+      const s1 = spot * iv / 100 * Math.sqrt(H / 8760), s2 = s1 * 2, sD = spot * iv / 100 * Math.sqrt(T), W = Math.max(0.006, Math.min(0.25, s2 * 2 / spot));
       /* gamma par prix d'exercice, échéance du jour, autour du prix */
       const byK = new Map();
-      for (const x of live) if (x.exp === E && x.oi > 0 && x.iv > 0 && Math.abs(x.k / spot - 1) < 0.04) { const g = (x.cp === "C" ? 1 : -1) * optGamma(spot, x.k, T, x.iv) * x.oi * spot * spot * 0.01; byK.set(x.k, (byK.get(x.k) || 0) + g); }
+      for (const x of live) if (x.exp === E && x.oi > 0 && x.iv > 0 && Math.abs(x.k / spot - 1) < W) { const g = (x.cp === "C" ? 1 : -1) * optGamma(spot, x.k, T, x.iv) * x.oi * spot * spot * 0.01; byK.set(x.k, (byK.get(x.k) || 0) + g); }
       const gk = [...byK].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4).sort((a, b) => a[0] - b[0]);
-      const rows = C.rows.filter(([k]) => Math.abs(k / spot - 1) < 0.04);
+      const rows = C.rows.filter(([k]) => Math.abs(k / spot - 1) < W);
       const pw = rows.filter(([k]) => k < spot).sort((a, b) => b[1].p - a[1].p)[0]?.[0], cw = rows.filter(([k]) => k > spot).sort((a, b) => b[1].c - a[1].c)[0]?.[0];
-      const mp = C.s.mp, magnet = Math.abs(mp / spot - 1) < 0.03 ? mp : (gk.filter(([, g]) => g > 0).sort((a, b) => Math.abs(a[0] - spot) - Math.abs(b[0] - spot))[0]?.[0] ?? spot);
-      const mk = (dir, e, w) => { const sl = e - dir * Math.max(s1 * 0.5, Math.abs(e - (w ?? e)) * 0.3 + s1 * 0.35), t1 = dir * (magnet - e) > s1 * 0.3 ? magnet : e + dir * s1, t2 = dir > 0 ? (cw && cw > t1 && cw - spot <= s2 * 1.5 ? cw : t1 + s1) : (pw && pw < t1 && spot - pw <= s2 * 1.5 ? pw : t1 - s1); return { dir, e, sl, t1, t2, rr: Math.abs(t1 - e) / Math.abs(e - sl), dist: Math.abs(e - spot) / spot * 100, inZone: Math.abs(e - spot) <= s2 }; };
-      const useP = pw && spot - pw <= s2 * 1.5, useC = cw && cw - spot <= s2 * 1.5, L = mk(1, useP ? pw : spot - s1, useP ? pw : null), Sh = mk(-1, useC ? cw : spot + s1, useC ? cw : null);
+      const mp = C.s.mp, magnet = Math.abs(mp / spot - 1) < W ? mp : (gk.filter(([, g]) => g > 0).sort((a, b) => Math.abs(a[0] - spot) - Math.abs(b[0] - spot))[0]?.[0] ?? spot);
+      const mk = (dir, e, w) => { const sl = e - dir * Math.max(s1 * 0.5, Math.abs(e - (w ?? e)) * 0.3 + s1 * 0.35), t1 = dir * (magnet - e) > s1 * 0.3 ? magnet : e + dir * s1, t2 = dir > 0 ? (cw && cw > t1 && cw - spot <= s2 * 1.3 ? cw : t1 + s1) : (pw && pw < t1 && spot - pw <= s2 * 1.3 ? pw : t1 - s1); return { dir, e, sl, t1, t2, rr: Math.abs(t1 - e) / Math.abs(e - sl), dist: Math.abs(e - spot) / spot * 100, inZone: Math.abs(e - spot) <= s2 }; };
+      const useP = pw && spot - pw <= s2, useC = cw && cw - spot <= s2, L = mk(1, useP ? pw : spot - s1, useP ? pw : null), Sh = mk(-1, useC ? cw : spot + s1, useC ? cw : null);
       const fav = magnet > spot + s1 * 0.2 ? 1 : magnet < spot - s1 * 0.2 ? -1 : 0;
       const lo = spot - s2 * 1.6, hi = spot + s2 * 1.6, X = p => clamp((p - lo) / (hi - lo) * 100, 0, 100).toFixed(2) + "%";
       const tick = (p, c, lab, top) => p == null || p < lo || p > hi ? "" : `<div style="position:absolute;left:${X(p)};top:${top ? 0 : 58}px;transform:translateX(-50%);font:10px var(--f-data);color:${c};white-space:nowrap;text-align:center">${top ? lab + "<br><b>" + P(p) + "</b>" : "<b>" + P(p) + "</b><br>" + lab}</div><div style="position:absolute;left:${X(p)};top:34px;width:2px;height:20px;background:${c};transform:translateX(-50%)"></div>`;
@@ -6121,7 +6122,7 @@ PANELS.options = {
           ${isFav ? `<span style="position:absolute;top:6px;right:8px;font-size:10px;color:var(--amber);font-weight:700">★ FAVORI</span>` : ""}
           <div style="font:700 12px var(--f-body);color:${p.dir > 0 ? "var(--up)" : "var(--down)"}">${p.dir > 0 ? "🟢 ACHAT ICI" : "🔴 VENTE ICI"}</div>
           <div style="font:700 21px var(--f-data);margin:2px 0">${P(p.e)}</div>
-          <div class="faint" style="font-size:10.5px">à ${fmtN(p.dist, 2)} % du prix · ${p.inZone ? "dans la zone attendue sur 1 h" : "hors de la zone attendue sur 1 h : peu probable"}</div>
+          <div class="faint" style="font-size:10.5px">à ${fmtN(p.dist, 2)} % du prix · ${p.inZone ? "dans la zone attendue sur " + HL : "hors de la zone attendue sur " + HL + " : peu probable"}</div>
           <div style="display:grid;grid-template-columns:auto 1fr auto;gap:2px 10px;margin-top:6px;font:11.5px var(--f-data)">
             <span class="up">🎯 Objectif 1</span><b class="up">${P(p.t1)}</b><span class="faint">${fmtPct((p.t1 / p.e - 1) * 100, 2)}</span>
             <span class="up">🎯 Objectif 2</span><b class="up">${P(p.t2)}</b><span class="faint">${fmtPct((p.t2 / p.e - 1) * 100, 2)}</span>
@@ -6130,19 +6131,19 @@ PANELS.options = {
       const gNear = [...byK.values()].reduce((a, b) => a + b, 0), vC = live.filter(x => x.exp === E && x.cp === "C").reduce((a, x) => a + x.vol, 0), vP = live.filter(x => x.exp === E && x.cp === "P").reduce((a, x) => a + x.vol, 0);
       const hLeft = Math.max(0, Math.round((Date.parse(E + "T08:00:00Z") - Date.now()) / 3600000));
       return `<div style="margin:6px 8px 10px;padding:8px;background:#070707;border:1px solid #222">
-          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;padding:0 4px"><b style="color:var(--amber);font-size:12px;letter-spacing:.06em">INTRADAY ≤ 1 H · ${esc(st.cur)}</b><span class="faint" style="font-size:10.5px">échéance du jour : ${fmtDay(E, { day: "numeric", month: "short" })} à 9 h (dans ${hLeft} h)</span></div>
+          <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;padding:0 4px"><b style="color:var(--amber);font-size:12px;letter-spacing:.06em">TRADE ${esc(HL.toUpperCase())} · ${esc(st.cur)}</b><span class="faint" style="font-size:10.5px">échéance utilisée : ${fmtDay(E, { day: "numeric", month: "short" })} à 9 h (dans ${hLeft < 48 ? hLeft + " h" : Math.round(hLeft / 24) + " j"})</span></div>
           ${ladder}
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">${[[L, fav >= 0], [Sh, fav < 0]].sort((a, b) => b[1] - a[1]).map(([p, f]) => card(p, f && fav !== 0)).join("")}</div>
           <div style="font-size:11.5px;margin:8px 4px 0;line-height:1.5">${fav > 0 ? `L'aimant du jour (${P(magnet)}) est <b>au-dessus</b> : léger avantage aux achats.` : fav < 0 ? `L'aimant du jour (${P(magnet)}) est <b>en dessous</b> : léger avantage aux ventes.` : `Le prix est déjà sur l'aimant du jour (${P(magnet)}) : plutôt du range, joue les bords de la zone.`} ${gNear >= 0 ? "Gamma <b class=\"up\">positif</b> autour du prix : les mouvements sont freinés, les murs tiennent mieux." : "Gamma <b class=\"down\">négatif</b> autour du prix : les cassures peuvent accélérer, stops un peu plus larges."}</div>
         </div>
         <div class="stat-row">
-          ${kpi("Zone attendue sur 1 h", "±" + P(s1), `68 % : ${P(spot - s1)} – ${P(spot + s1)}`)}
+          ${kpi("Zone attendue sur " + HL, "±" + P(s1), `68 % : ${P(spot - s1)} – ${P(spot + s1)}`)}
           ${kpi("Zone large (95 %)", "±" + P(s2), `${P(spot - s2)} – ${P(spot + s2)}`)}
-          ${kpi("Jusqu'à l'échéance", "±" + P(sD), `±${fmtN(sD / spot * 100, 2)} % en ${hLeft} h`)}
-          ${kpi("Vol. implicite du jour", fmtN(iv, 1) + " %", data.dvol ? `DVOL ${fmtN(data.dvol.now, 1)}` : "")}
+          ${kpi("Jusqu'à l'échéance", "±" + P(sD), `±${fmtN(sD / spot * 100, 2)} % en ${hLeft < 48 ? hLeft + " h" : Math.round(hLeft / 24) + " j"}`)}
+          ${kpi("Vol. implicite (échéance)", fmtN(iv, 1) + " %", data.dvol ? `DVOL ${fmtN(data.dvol.now, 1)}` : "")}
           ${kpi("Flux du jour", vC + vP ? fmtN(vC / (vC + vP) * 100, 0) + " % calls" : "—", vC + vP ? (vC > vP * 1.5 ? "on achète la hausse" : vP > vC * 1.5 ? "on se protège" : "neutre") : "", vC > vP * 1.5 ? "up" : vP > vC * 1.5 ? "down" : "")}
         </div>
-        <p class="hint" style="padding:0 10px 10px">Ronds <span style="color:#00BCD4">bleus</span> = gamma positif (le prix y est attiré ou y colle), <span style="color:#E040FB">violets</span> = gamma négatif (s'il les traverse, ça accélère). Ces niveaux comptent surtout avant l'expiration de 9 h. Valable pour BTC et ETH, qui suivent souvent le Nasdaq, mais pas directement pour XYZ100. Pas un conseil.</p>`;
+        <p class="hint" style="padding:0 10px 10px">Ronds <span style="color:#00BCD4">bleus</span> = gamma positif (le prix y est attiré ou y colle), <span style="color:#E040FB">violets</span> = gamma négatif (s'il les traverse, ça accélère). Choisis la durée de ton trade en haut : la zone, les stops et les objectifs s'adaptent (1 min et 5 min = zones très serrées, Swing = échéance d'environ une semaine). Valable pour BTC et ETH, qui suivent souvent le Nasdaq, mais pas directement pour XYZ100. Pas un conseil.</p>`;
     }
     function tabOI(C) {
       const { spot, s } = C, step = +st.step || 0, zone = (+st.zone || (C.intra ? 5 : 20)) / 100;
@@ -7009,6 +7010,75 @@ NEWS_FEEDS.splice(NEWS_FEEDS.findIndex(f => f[1] === "en"), 0,
 {
   const base = newsFeed;
   newsFeed = async (name, lang, url) => { const r = await base(name, lang, url); if (name === "FinancialJuice") for (const x of r) { x.title = x.title.replace(/^FinancialJuice:\s*/i, ""); x.desc = (x.desc || "").replace(/^FinancialJuice:\s*/i, ""); } return r; };
+}
+
+
+/* ===== v2 : layout2.js ===== */
+/* ==================== disposition pensée pour un écran 21:9 : vue d'ensemble, XYZ100, Bitcoin, et onglets rangés ==================== */
+function layout2Build(old) {
+  const keep = t => { for (const w of old) for (const p of w.panels) if (p.type === t && p.state && Object.keys(p.state).length) return JSON.parse(JSON.stringify(p.state)); return {}; };
+  const Q = (type, x, y, w, hh, state) => ({ id: uid(), type, x, y, w, h: hh, g: 4, state: state || {} });
+  const ch = (sym, tf, x, y, w, hh) => Q("chart", x, y, w, hh, { sym, tf, link: false, ind: { vol: true } });
+  const hl = () => keep("hl"), XYZ = "HL:XYZ:XYZ100", BTC = "HL:BTC";
+  return [
+    { name: "Mon tableau de bord", panels: [
+      Q("mk2", 0, 0, 10, 46), Q("hl", 0, 46, 10, 46, hl()),
+      ch(XYZ, "15m", 10, 0, 20, 50), ch(BTC, "15m", 10, 50, 10, 42), Q("most", 20, 50, 10, 42),
+      Q("sentiment", 30, 0, 9, 28), ch("EUR/USD", "15m", 30, 28, 9, 32), ch("WTI/USD", "15m", 30, 60, 9, 32),
+      Q("calendar2", 39, 0, 9, 40, { cur: "mine" }), Q("newsfr", 39, 40, 9, 36, { f: "my" }), Q("alerts2", 39, 76, 9, 16, keep("alerts2"))
+    ] },
+    { name: "XYZ100", panels: [
+      Q("hl", 0, 0, 9, 40, hl()), Q("calc2", 0, 40, 9, 30, { ...keep("calc2"), sym: XYZ }), Q("alerts2", 0, 70, 9, 22),
+      ch(XYZ, "15m", 9, 0, 22, 58), ch(XYZ, "4h", 9, 58, 11, 34), ch(XYZ, "1m", 20, 58, 11, 34),
+      Q("sr", 31, 0, 9, 46, { sym: XYZ }), Q("asset", 31, 46, 9, 46, { link: false, sym: XYZ }),
+      Q("calendar2", 40, 0, 8, 46, { cur: "USD" }), Q("newsfr", 40, 46, 8, 46, { f: "nasdaq" })
+    ] },
+    { name: "Bitcoin", panels: [
+      Q("hl", 0, 0, 9, 40, hl()), Q("ls", 0, 40, 9, 52, { k: "BTC" }),
+      ch(BTC, "15m", 9, 0, 22, 50), Q("liqheat", 9, 50, 22, 42, { c: "BTC", per: "1s" }),
+      Q("options", 31, 0, 9, 60, { cur: "BTC", mode: "intra" }), Q("sr", 31, 60, 9, 32, { sym: "BTCUSDT" }),
+      ch(BTC, "4h", 40, 0, 8, 34), Q("newsfr", 40, 34, 8, 34, { f: "crypto" }), Q("calendar2", 40, 68, 8, 24, { cur: "USD" })
+    ] },
+    { name: "Analyse", panels: [
+      Q("liqheat", 0, 0, 24, 58, { c: "xyz:XYZ100", per: "1s" }), Q("liqmap", 24, 0, 24, 58),
+      Q("sentiment", 0, 58, 12, 34), Q("corr", 12, 58, 18, 34), Q("hs", 30, 58, 18, 34)
+    ] },
+    { name: "Marchés", panels: [
+      Q("sectors", 0, 0, 30, 60), Q("asset", 30, 0, 18, 60, { link: true }),
+      Q("screener", 0, 60, 20, 32), Q("earnings", 20, 60, 14, 32), Q("wei", 34, 60, 14, 32)
+    ] },
+    { name: "Macro & taux", panels: [
+      Q("rates", 0, 0, 12, 34), Q("curve", 12, 0, 18, 34), Q("poly", 30, 0, 18, 34),
+      Q("macro", 0, 34, 20, 58), Q("spreads", 20, 34, 14, 58), Q("m2", 34, 34, 14, 30), Q("dates", 34, 64, 14, 28)
+    ] },
+    { name: "Fonctions", panels: [
+      Q("fxc", 0, 0, 14, 40), Q("btst", 14, 0, 20, 46), Q("diag", 34, 0, 14, 46),
+      Q("audio", 0, 40, 14, 22), Q("ships", 14, 46, 20, 46)
+    ] }
+  ];
+}
+if (!store.get("v2.layout2", false)) {
+  store.set("v2.layout2", true);
+  try {
+    store.set("layout.before2", { t: Date.now(), ws: JSON.parse(JSON.stringify(WS)), cur: curWS });
+    const fresh = layout2Build(WS), names = new Set(fresh.map(w => w.name));
+    const keepTabs = ["Graphique", "Idées de trades", "Journal & outils", "Guide"];
+    const pick = n => WS.find(w => w.name === n);
+    const order = ["Mon tableau de bord", "XYZ100", "Bitcoin", "Graphique", "Idées de trades", "Analyse", "Marchés", "Macro & taux", "Journal & outils", "Fonctions", "Guide"];
+    const out = [];
+    for (const n of order) { const f = fresh.find(w => w.name === n); if (f) out.push(f); else if (pick(n)) out.push(pick(n)); }
+    /* tes onglets à toi (copies, etc.) restent, à la fin */
+    for (const w of WS) if (!names.has(w.name) && !keepTabs.includes(w.name)) out.push(w);
+    WS = out; curWS = 0; saveWS();
+  } catch (e) { console.error(e); }
+}
+{
+  const baseAdd2 = addPanelMenu;
+  addPanelMenu = anchor => {
+    baseAdd2(anchor);
+    const m = [...document.querySelectorAll(".menu")].at(-1), b = store.get("layout.before2", null); if (!m || !b) return;
+    m.append(h("button", { onclick: async () => { closeMenus(); if (await askOk("Revenir à ta disposition d'avant la réorganisation du 27/11 ? (la disposition actuelle sera remplacée)", "Revenir")) { WS = JSON.parse(JSON.stringify(b.ws)); curWS = clamp(b.cur || 0, 0, WS.length - 1); saveWS(); renderTabs(); mountWS(); } } }, "↶ Disposition d'avant (27/11)", h("small", {}, "Annule la réorganisation des onglets")));
+  };
 }
 
 WS.forEach(w => { w.panels = w.panels.filter(p => PANELS[p.type]); });
