@@ -968,7 +968,7 @@ PANELS.chart = {
     const theme = () => ({
       layout: { background: { type: "solid", color: css("--panel") }, textColor: css("--muted"), fontFamily: "IBM Plex Mono, monospace", fontSize: 10 },
       grid: { vertLines: { color: css("--line") }, horzLines: { color: css("--line") } },
-      rightPriceScale: { borderColor: css("--line-2") }, timeScale: { borderColor: css("--line-2"), timeVisible: true, secondsVisible: false, rightOffset: 12, shiftVisibleRangeOnNewBar: true },
+      rightPriceScale: { borderColor: css("--line-2") }, timeScale: { borderColor: css("--line-2"), timeVisible: true, secondsVisible: false, rightOffset: 12, shiftVisibleRangeOnNewBar: true }, handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       crosshair: { mode: 0 }
     });
     const mk = el => LightweightCharts.createChart(el, { autoSize: true, ...theme() });
@@ -990,14 +990,14 @@ PANELS.chart = {
     let syncing = false;
     const charts = [chart, rsiC, macdC];
     charts.forEach(c => c.timeScale().subscribeVisibleLogicalRangeChange(r => {
-      if (syncing || !r) return; syncing = true;
+      if (syncing || !r) return; if (c !== chart) { try { const el = c.chartElement(); if (!el || !el.offsetWidth || !el.offsetHeight || el.closest("[hidden]") || getComputedStyle(el.parentElement).display === "none") return; } catch { return; } } syncing = true;
       charts.forEach(o => { if (o !== c) o.timeScale().setVisibleLogicalRange(r); }); syncing = false;
     }));
 
     let loadKey = "", userMoved = false, noMore = false, older = false;
     const toEnd = () => { if (!bars.length || !body.isConnected) return; const w = body.clientWidth || 600, n = clamp(Math.round(w / 7), 40, 200); try { chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - n), to: bars.length + 8 }); } catch { } };
-    ["pointerdown", "wheel", "touchstart"].forEach(ev => body.addEventListener(ev, () => { userMoved = true; }, { passive: true }));
-    let roEnd = null; try { roEnd = new ResizeObserver(() => { if (!userMoved) toEnd(); }); roEnd.observe(body); } catch { }
+    ["pointerdown", "mousedown", "wheel", "touchstart"].forEach(ev => body.addEventListener(ev, () => { userMoved = true; }, { passive: true, capture: true }));
+    let roEnd = null, roW = 0; try { roEnd = new ResizeObserver(() => { const w = body.clientWidth; if (Math.abs(w - roW) < 2) return; roW = w; if (!userMoved) toEnd(); }); roEnd.observe(body); } catch { }
     /* historique plus ancien chargé quand on fait défiler vers la gauche */
     async function loadOlder() {
       if (older || noMore || !bars.length) return; older = true;
@@ -7079,6 +7079,45 @@ if (!store.get("v2.layout2", false)) {
     const m = [...document.querySelectorAll(".menu")].at(-1), b = store.get("layout.before2", null); if (!m || !b) return;
     m.append(h("button", { onclick: async () => { closeMenus(); if (await askOk("Revenir à ta disposition d'avant la réorganisation du 27/11 ? (la disposition actuelle sera remplacée)", "Revenir")) { WS = JSON.parse(JSON.stringify(b.ws)); curWS = clamp(b.cur || 0, 0, WS.length - 1); saveWS(); renderTabs(); mountWS(); } } }, "↶ Disposition d'avant (27/11)", h("small", {}, "Annule la réorganisation des onglets")));
   };
+}
+/* v3 : onglets XYZ100 et Bitcoin construits pareil — 3 graphiques (15 min, 4h, 1 min), heatmap des liquidations, S/R ; longs/shorts plus petit */
+if (!store.get("v2.layout3", false)) {
+  store.set("v2.layout3", true);
+  try {
+    const keep = t => { for (const w of WS) for (const p of w.panels) if (p.type === t && p.state && Object.keys(p.state).length) return JSON.parse(JSON.stringify(p.state)); return {}; };
+    const Q = (type, x, y, w, hh, state) => ({ id: uid(), type, x, y, w, h: hh, g: 4, state: state || {} });
+    const ch = (sym, tf, x, y, w, hh) => Q("chart", x, y, w, hh, { sym, tf, link: false, ind: { vol: true } });
+    const XYZ = "HL:XYZ:XYZ100", BTC = "HL:BTC";
+    const tabs = {
+      XYZ100: [
+        Q("hl", 0, 0, 9, 34, keep("hl")), Q("calc2", 0, 34, 9, 30, { ...keep("calc2"), sym: XYZ }), Q("alerts2", 0, 64, 9, 28),
+        ch(XYZ, "15m", 9, 0, 22, 52), ch(XYZ, "4h", 9, 52, 11, 40), ch(XYZ, "1m", 20, 52, 11, 40),
+        Q("liqheat", 31, 0, 9, 46, { c: "xyz:XYZ100", per: "1j" }), Q("sr", 31, 46, 9, 46, { sym: XYZ }),
+        Q("calendar2", 40, 0, 8, 46, { cur: "USD" }), Q("newsfr", 40, 46, 8, 46, { f: "nasdaq" })
+      ],
+      Bitcoin: [
+        Q("hl", 0, 0, 9, 34, keep("hl")), Q("calc2", 0, 34, 9, 30, { ...keep("calc2"), sym: BTC }), Q("ls", 0, 64, 9, 28, { k: "BTC" }),
+        ch(BTC, "15m", 9, 0, 22, 52), ch(BTC, "4h", 9, 52, 11, 40), ch(BTC, "1m", 20, 52, 11, 40),
+        Q("liqheat", 31, 0, 9, 46, { c: "BTC", per: "1j" }), Q("sr", 31, 46, 9, 46, { sym: "BTCUSDT" }),
+        Q("options", 40, 0, 8, 52, { cur: "BTC", mode: "intra", hz: "1h" }), Q("newsfr", 40, 52, 8, 24, { f: "crypto" }), Q("calendar2", 40, 76, 8, 16, { cur: "USD" })
+      ]
+    };
+    for (const [n, panels] of Object.entries(tabs)) { const w = WS.find(x => x.name === n); if (w) w.panels = panels; }
+    saveWS();
+  } catch (e) { console.error(e); }
+}
+/* v4 : Analyse sans la carte de liquidité (doublon moins lisible de la heatmap des liquidations) */
+if (!store.get("v2.layout4", false)) {
+  store.set("v2.layout4", true);
+  try {
+    const w = WS.find(x => x.name === "Analyse");
+    if (w) {
+      w.panels = w.panels.filter(p => p.type !== "liqmap");
+      const pos = { liqheat: [0, 0, 32, 58], sentiment: [32, 0, 16, 58], corr: [0, 58, 24, 34], hs: [24, 58, 24, 34] };
+      for (const p of w.panels) if (pos[p.type]) { [p.x, p.y, p.w, p.h] = pos[p.type]; p.g = 4; }
+      saveWS();
+    }
+  } catch { }
 }
 
 WS.forEach(w => { w.panels = w.panels.filter(p => PANELS[p.type]); });
