@@ -1,0 +1,165 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "rewrites": [
+    {
+      "source": "/p/fred/:path*",
+      "destination": "https://fred.stlouisfed.org/:path*"
+    },
+    {
+      "source": "/p/yq1/:path*",
+      "destination": "https://query1.finance.yahoo.com/:path*"
+    },
+    {
+      "source": "/p/yq2/:path*",
+      "destination": "https://query2.finance.yahoo.com/:path*"
+    },
+    {
+      "source": "/p/es/:path*",
+      "destination": "https://ec.europa.eu/:path*"
+    },
+    {
+      "source": "/p/gn/:path*",
+      "destination": "https://news.google.com/:path*"
+    },
+    {
+      "source": "/p/gt/:path*",
+      "destination": "https://translate.googleapis.com/:path*"
+    },
+    {
+      "source": "/p/eb/:path*",
+      "destination": "https://www.easybourse.com/:path*"
+    },
+    {
+      "source": "/p/le/:path*",
+      "destination": "https://services.lesechos.fr/:path*"
+    },
+    {
+      "source": "/p/lf/:path*",
+      "destination": "https://www.lefigaro.fr/:path*"
+    },
+    {
+      "source": "/p/jdc/:path*",
+      "destination": "https://journalducoin.com/:path*"
+    },
+    {
+      "source": "/p/ff/:path*",
+      "destination": "https://nfs.faireconomy.media/:path*"
+    },
+    {
+      "source": "/p/bls/:path*",
+      "destination": "https://api.bls.gov/:path*"
+    },
+    {
+      "source": "/p/okx/:path*",
+      "destination": "https://www.okx.com/:path*"
+    },
+    {
+      "source": "/p/bybit/:path*",
+      "destination": "https://api.bybit.com/:path*"
+    },
+    {
+      "source": "/p/cnbc/:path*",
+      "destination": "https://quote.cnbc.com/:path*"
+    },
+    {
+      "source": "/p/dbn/:path*",
+      "destination": "https://api.db.nomics.world/:path*"
+    },
+    {
+      "source": "/p/fredapi/:path*",
+      "destination": "https://api.stlouisfed.org/:path*"
+    },
+    {
+      "source": "/p/bis/:path*",
+      "destination": "https://stats.bis.org/:path*"
+    },
+    {
+      "source": "/p/nyfed/:path*",
+      "destination": "https://markets.newyorkfed.org/:path*"
+    },
+    {
+      "source": "/p/boj/:path*",
+      "destination": "https://www.stat-search.boj.or.jp/:path*"
+    },
+    {
+      "source": "/p/boe/:path*",
+      "destination": "https://www.bankofengland.co.uk/:path*"
+    },
+    {
+      "source": "/p/gnews/:path*",
+      "destination": "https://news.google.com/:path*"
+    },
+    {
+      "source": "/p/lesechos/:path*",
+      "destination": "https://services.lesechos.fr/:path*"
+    },
+    {
+      "source": "/p/figaro/:path*",
+      "destination": "https://www.lefigaro.fr/:path*"
+    },
+    {
+      "source": "/p/easybourse/:path*",
+      "destination": "https://www.easybourse.com/:path*"
+    },
+    {
+      "source": "/p/cnbcrss/:path*",
+      "destination": "https://www.cnbc.com/:path*"
+    },
+    {
+      "source": "/p/mw/:path*",
+      "destination": "https://feeds.content.dowjones.io/:path*"
+    },
+    {
+      "source": "/p/fxstreet/:path*",
+      "destination": "https://www.fxstreet.com/:path*"
+    },
+    {
+      "source": "/p/oilprice/:path*",
+      "destination": "https://oilprice.com/:path*"
+    },
+    {
+      "source": "/p/coindesk/:path*",
+      "destination": "https://www.coindesk.com/:path*"
+    },
+    {
+      "source": "/p/theblock/:path*",
+      "destination": "https://www.theblock.co/:path*"
+    },
+    {
+      "source": "/p/bnf/:path*",
+      "destination": "https://fapi.binance.com/:path*"
+    },
+    {
+      "source": "/p/bitget/:path*",
+      "destination": "https://api.bitget.com/:path*"
+    },
+    {
+      "source": "/p/gate/:path*",
+      "destination": "https://api.gateio.ws/:path*"
+    },
+    {
+      "source": "/p/fj/:path*",
+      "destination": "https://www.financialjuice.com/:path*"
+    },
+    {
+      "source": "/p/salpha/:path*",
+      "destination": "https://seekingalpha.com/:path*"
+    },
+    {
+      "source": "/p/investing/:path*",
+      "destination": "https://www.investing.com/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
+  ]
+}
